@@ -1,1 +1,65 @@
-dd
+import os
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+path = "images"
+labels_file = "annotations/list.txt"
+
+#etiquetas
+labels_dict = {
+    line.split()[0].split('.')[0]: 0 if int(line.split()[1]) < 37 else 1
+    for line in open(labels_file)
+    if not line.startswith("#")
+}
+
+#procesar imagen
+def preprocess(img_path, filtro=None):
+    img = cv2.imread(img_path)
+    if img is None: return None
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    if filtro == "sobel":
+        sx = cv2.Sobel(gray, cv2.CV_64F, 1, 0)
+        sy = cv2.Sobel(gray, cv2.CV_64F, 0, 1)
+        mag = np.sqrt(sx**2 + sy**2)
+        gray = np.uint8(255 * mag / np.max(mag))
+    elif filtro == "laplaciano":
+        lap = cv2.Laplacian(gray, cv2.CV_64F)
+        gray = np.uint8(255 * np.absolute(lap) / np.max(np.absolute(lap)))
+    elif filtro == "canny":
+        gray = cv2.Canny(gray, 100, 200)
+
+    return cv2.resize(gray, (64, 64)).flatten(), cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2RGB), (64, 64))
+
+#dataset
+def cargar_datos(filtro=None):
+    X, y, imgs = [], [], []
+    for file in os.listdir(path):
+        if file.endswith(".jpg"):
+            name = file.split('.')[0]
+            if name in labels_dict:
+                resultado = preprocess(os.path.join(path, file), filtro)
+                if resultado:
+                    vec, img = resultado
+                    X.append(vec)
+                    y.append(labels_dict[name])
+                    imgs.append(img)
+    return np.array(X), np.array(y), np.array(imgs, dtype=object)
+
+def evaluar(X, y, imgs, nombre):
+    print(f"\n {nombre} - Total: {len(y)} - Perros: {sum(y==0)} - Gatos: {sum(y==1)}")
+    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.2, stratify=y, random_state=42)
+    imgte = imgs[y != None][-len(yte):]  #para asegurar longitud
+    modelo = KNeighborsClassifier(n_neighbors=3)
+    modelo.fit(Xtr, ytr)
+    pred = modelo.predict(Xte)
+    acc = accuracy_score(yte, pred) * 100
+    print(f"Precisión: {acc:.2f}%")
+
+for filtro in [None, "sobel", "laplaciano", "canny"]:
+    X, y, imgs = cargar_datos(filtro)
+    evaluar(X, y, imgs, f"Filtro: {filtro if filtro else 'ninguno'}")
